@@ -9,11 +9,12 @@ local ev = require "lib.samp.events"
 local ffi = require 'ffi'
 local imgui = require 'mimgui'
 local inicfg = require 'inicfg'
+local requests = require 'requests'
 local encoding = require 'encoding'
 encoding.default = 'CP1251'
 u8 = encoding.UTF8
 
--- ini
+-- ini test
 if not doesFileExist('moonloader/TradeHelper') then
     createDirectory('moonloader/TradeHelper')
 end
@@ -33,6 +34,7 @@ inicfg.save(ini,IniFilename)
 local new = imgui.new
 local MainWindow = new.bool()
 local DialogWindow = new.bool()
+local UpdateWindow = new.bool()
 local inputDialog = new.char[108]()
 local sizeX, sizeY = getScreenResolution()
 local EditedMenu = false
@@ -42,9 +44,11 @@ local posX, posY, size1, size2 = ini.settings.pos1,ini.settings.pos2,ini.setting
 local tag = '[ Trade Helper ] {e6e6e6}'
 local colour = 0xe4ee5a
 
-local tradePlayer = {}
 local onTrade = false
+local onUserTrade, onPlayerTrade = false, false
+local tradePlayer = {}
 local DialogText = {}
+local newUpdate = {version = script.this.version, updates = "Релиз."}
 
 function main()
     if not isSampLoaded() or not isSampfuncsLoaded() then return end
@@ -52,6 +56,7 @@ function main()
     sampAddChatMessage(tag .. "Скрипт успешно загружен! Используйте /tmenu",colour)
     sampRegisterChatCommand('tr',tr)
     sampRegisterChatCommand('tmenu',tmenu)
+    sampRegisterChatCommand('test',test)
     
     -- Установка шрифта
     if not doesFileExist('moonloader/TradeHelper/EagleSans-Reg.ttf') then
@@ -62,6 +67,7 @@ function main()
         end)
     end
     --
+    checkUpdates()
 
     while true do
         wait(0)
@@ -127,7 +133,7 @@ end)
 
 local MainFrame = imgui.OnFrame(function() return MainWindow[0] end, function(player)
     imgui.SetNextWindowPos(imgui.ImVec2(sizeX / 2, sizeY / 2), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5))
-    imgui.SetNextWindowSize(imgui.ImVec2(525, 275), imgui.Cond.FirstUseEver)
+    imgui.SetNextWindowSize(imgui.ImVec2(525, 500), imgui.Cond.FirstUseEver)
     imgui.PushFont(font)
     imgui.Begin(u8"Основные настройки", MainWindow, imgui.WindowFlags.NoResize + imgui.WindowFlags.NoCollapse)
         if imgui.BeginChild('Edit', imgui.ImVec2(250, 150), true) then
@@ -176,6 +182,7 @@ local MainFrame = imgui.OnFrame(function() return MainWindow[0] end, function(pl
             inicfg.save(ini,IniFilename)
             sampAddChatMessage(tag .. "Все успешно сохраненно!", colour)
         end
+        imgui.VerticalSeparator()
     imgui.PopFont()
     imgui.End()
 end)
@@ -185,16 +192,17 @@ local DialogFrame = imgui.OnFrame(function() return DialogWindow[0] end, functio
     imgui.SetNextWindowPos(imgui.ImVec2(posX, posY), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5))
     imgui.SetNextWindowSize(imgui.ImVec2(size1, size2), imgui.Cond.FirstUseEver)
     imgui.PushFont(font)
-    imgui.Begin(u8"Дилог", DialogWindow, imgui.WindowFlags.NoCollapse)
+    imgui.Begin(u8"Диалог", DialogWindow, imgui.WindowFlags.NoCollapse)
         posX, posY, size1, size2 = imgui.GetWindowPos().x,imgui.GetWindowPos().y, imgui.GetWindowWidth(), imgui.GetWindowHeight()
         if tradePlayer[1] then
             imgui.Text(u8'Игрок: ' .. tradePlayer[1] .. '[' .. tradePlayer[2] .. ']')
             if imgui.BeginChild('Dialog', imgui.ImVec2(imgui.GetWindowWidth()-15, imgui.GetWindowHeight()-100), true) then
                 if #DialogText > 0 then
-                    for i, Text in ipairs(DialogText) do
-                        imgui.TextColoredRGB(string.format("{ffffff} %s", Text))
+                    for i, data in ipairs(DialogText) do
+                        imgui.TextColoredRGB(string.format("%s[%s] %s", data.color, data.date,data.text))
                         if imgui.IsItemClicked() then
-                            setClipboardText(Text:gsub("{.-}", ""))
+                            text = string.format("[%s] %s", data.date, data.text)
+                            setClipboardText(text:gsub("{.-}", ""))
                             sampAddChatMessage(tag .. 'Вы успешно скопировали текст!', colour)
                         end
                     end
@@ -218,6 +226,49 @@ local DialogFrame = imgui.OnFrame(function() return DialogWindow[0] end, functio
     imgui.End()
 end)
 
+local UpdateFrame = imgui.OnFrame(function() return UpdateWindow[0] end, function(player)
+    imgui.SetNextWindowPos(imgui.ImVec2(sizeX / 2, sizeY / 2), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5))
+    imgui.SetNextWindowSize(imgui.ImVec2(525, 300), imgui.Cond.FirstUseEver)
+    imgui.PushFont(font)
+    imgui.Begin(u8"Обновление", UpdateWindow, imgui.WindowFlags.NoResize + imgui.WindowFlags.NoCollapse)
+        if newUpdate.version == script.this.version then
+            imgui.Text(u8"У вас последняя версия скрипта! :)")
+        else
+            imgui.Text(string.format(u8"Вышло обновление, новая версия %s, перед обновлением вы\nможете посмотреть исходный файл на ", newUpdate.version ))
+            imgui.SetCursorPos(imgui.ImVec2(310, 53))
+            imgui.Link("https://github.com/Turan-Fresko/TradeHelper-ARZ/",u8"репозитории GitHub.")
+            imgui.Text(u8'Что нового?')
+            if imgui.BeginChild('Updates', imgui.ImVec2(510,150), true) then
+                if type(newUpdate.updates) == 'string' then
+                    imgui.Text(newUpdate.updates)
+                elseif type(newUpdate.updates) == 'table' then
+                    for i, text in ipairs(newUpdate.updates) do
+                        imgui.Text(text)
+                    end
+                end
+                imgui.EndChild()
+            end
+            if imgui.Button(u8"Проверить наличие обновлений",imgui.ImVec2(300, 37)) then
+                checkUpdates()
+            end
+            imgui.SameLine()
+            if imgui.Button(u8"Обновить",imgui.ImVec2(200, 37)) then
+                if newUpdate.version == script.this.version then
+                    sampAddChatMessage(tag.. 'У вас сейчас установлена последняя версия скрипта!', colour)
+                else
+                    downloadUrlToFile('https://raw.githubusercontent.com/Turan-Fresko/TradeHelper-ARZ/main/tradehelper.lua', thisScript().path, function (id, status, p1, p2)
+                        if status == dlstatus.STATUSEX_ENDDOWNLOAD then
+                            sampAddChatMessage(tag..'Обновление установлена! Перезагружаюсь...', colour)
+                            thisScript():reload()
+                        end
+                    end)
+                end
+            end
+        end
+    imgui.PopFont()
+    imgui.End()
+end)
+
 function ev.onServerMessage(id,text ,color)
     if id == -65281 and string.find(text,"Вы предложили") then
         lua_thread.create(function() 
@@ -231,7 +282,7 @@ function ev.onServerMessage(id,text ,color)
             DialogWindow[0] = true
         end)
     end
-    if id == -65281 and string.find(text, 'Вы отказались от предложения торговли.') then
+    if id == -65281 and onTrade and string.find(text, 'Вы отказались от предложения торговли.') then
         sampAddChatMessage(tag.. 'Вы отказались от трейда с игроком: '.. tradePlayer[1] .. ', закрываю диалог.', colour)
         DialogText = {}
         onTrade = false
@@ -250,7 +301,7 @@ function ev.onServerMessage(id,text ,color)
         DialogWindow[0] = false
     end
     if id == -1347440641 and onTrade and string.find(text,"Вы подтвердили сделку!") or string.find(text,"Игрок подтвердил сделку!") then
-        table.insert(DialogText,text)
+        table.insert(DialogText,{date = os.date("%H:%M:%S"), text = text, color = "{fffb00}"})
     end
     if id == 1118842111 and onTrade and string.find(text,"Сделка прошла успешно!") then
         sampAddChatMessage(tag.. 'Вы завершили трейд с игроком '.. tradePlayer[1] .. ', закрываю диалог.', colour)
@@ -265,9 +316,75 @@ function ev.onServerMessage(id,text ,color)
         nickname2 = sampGetPlayerNickname(id):match("([%a_]+)")
         if not nickname1 or not nickname2 then return end
         if string.find(text, nickname1) or string.find(text, nickname2) then 
-            table.insert(DialogText,string.format("[%s] %s", os.date("%H:%M:%S"), text))
+            table.insert(DialogText,{date = os.date("%H:%M:%S"), text = text, color = "{FFFFFF}"})
         end
     end
+end
+
+function ev.onShowTextDraw(id, data)
+    print(id .. " " .. data.text)
+    if onTrade then
+        if id == 2078 and not data.text == '_' then
+            lua_thread.create(function()
+                wait(152)
+                table.insert(DialogText,{date = os.date("%H:%M:%S"), text = string.format("Игрок пложил в трейд %s %s", data.text, sampTextdrawGetString(2079)), color = "{049e20}"})
+            end)
+        end
+    end
+end
+
+function asyncHttpRequest(method, url, args, resolve, reject)
+    local request_thread = effil.thread(function (method, url, args)
+       local result, response = pcall(requests.request, method, url, args)
+       if result then
+          response.json, response.xml = nil, nil
+          return true, response
+       else
+          return false, response
+       end
+    end)(method, url, args)
+    if not resolve then resolve = function() end end
+    if not reject then reject = function() end end
+    lua_thread.create(function()
+       local runner = request_thread
+       while true do
+          local status, err = runner:status()
+          if not err then
+             if status == 'completed' then
+                local result, response = runner:get()
+                if result then
+                   resolve(response)
+                else
+                   reject(response)
+                end
+                return
+             elseif status == 'canceled' then
+                return reject(status)
+             end
+          else
+             return reject(err)
+          end
+          wait(0)
+       end
+    end)
+end
+
+function checkUpdates()
+    sampAddChatMessage(tag .. 'Проверка наличий обновлений...',colour)
+    local result, response = pcall(requests.request, 'GET', 'https://raw.githubusercontent.com/Turan-Fresko/TradeHelper-ARZ/main/updates.json', nil, nil)
+    if result then
+        responseJson = decodeJson(response.text)
+        if responseJson.version == script.this.version then sampAddChatMessage(tag .. 'У вас последняя версия скрипта!',colour)
+        else
+            newUpdate = responseJson
+            sampAddChatMessage(tag .. 'Вышло новое обновление!',colour)
+        end
+    else sampAddChatMessage(tag .. '{ff4444}Не удалось проверить наличие обновлений!',colour) end
+end
+
+function imgui.VerticalSeparator()
+    local p = imgui.GetCursorScreenPos()
+    imgui.GetWindowDrawList():AddLine(imgui.ImVec2(p.x, p.y), imgui.ImVec2(p.x, p.y + imgui.GetContentRegionMax().y), 0x817e7e81)
 end
 
 function imgui.TextColoredRGB(text)
@@ -318,6 +435,18 @@ function imgui.TextColoredRGB(text)
     render_text(text)
 end
 
+function imgui.Link(link, text)
+    text = text or link
+    local tSize = imgui.CalcTextSize(text)
+    local p = imgui.GetCursorScreenPos()
+    local DL = imgui.GetWindowDrawList()
+    local col = { 0xFFFF7700, 0xFFFF9900 }
+    if imgui.InvisibleButton("##" .. link, tSize) then os.execute("explorer " .. link) end
+    local color = imgui.IsItemHovered() and col[1] or col[2]
+    DL:AddText(p, color, text)
+    DL:AddLine(imgui.ImVec2(p.x, p.y + tSize.y), imgui.ImVec2(p.x + tSize.x, p.y + tSize.y), color)
+end
+
 function imgui.CenterButton(text)
     imgui.SetCursorPosX(imgui.GetWindowWidth()/2-imgui.CalcTextSize(u8(text)).x/2)
     return imgui.Button(u8(text))
@@ -331,6 +460,9 @@ function ev.onShowDialog(id, style, title, button1, button2, text)
         tradePlayer = {tradeNickName, tradeId}
         onTrade = true
         DialogWindow[0] = true
+    end
+    if onTrade and onUserTrade or onPlayerTrade then
+
     end
 end
 
@@ -369,4 +501,8 @@ function tr(args)
     DialogText = {}
     onTrade = true
     DialogWindow[0] = true
+end
+
+function test()
+    UpdateWindow[0] = not UpdateWindow[0]
 end
