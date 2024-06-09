@@ -1,6 +1,6 @@
 script_name("Trade Helper")
 script_author("Turan_")
-script_version("1.0.1")
+script_version("1.0.0")
 script_description("Скрипт, помогающий при обмене/общении с игроком в людных местах, путем вывода сообщений в отдельное диалоговое окно.")
 
 require 'lib.moonloader'
@@ -14,7 +14,7 @@ local encoding = require 'encoding'
 encoding.default = 'CP1251'
 u8 = encoding.UTF8
 
--- ini test
+-- ini
 if not doesFileExist('moonloader/TradeHelper') then
     createDirectory('moonloader/TradeHelper')
 end
@@ -24,7 +24,8 @@ local ini = inicfg.load({
         pos1 = 1049,
         pos2 = 145,
         size1 = 575,
-        size2 = 289
+        size2 = 289,
+        NewDialog = false
         }
     }, IniFilename)
 inicfg.save(ini,IniFilename)
@@ -35,6 +36,7 @@ local new = imgui.new
 local MainWindow = new.bool()
 local DialogWindow = new.bool()
 local UpdateWindow = new.bool()
+local ItemWindow = new.bool()
 local inputDialog = new.char[108]()
 local sizeX, sizeY = getScreenResolution()
 local EditedMenu = false
@@ -46,6 +48,8 @@ local colour = 0xe4ee5a
 
 local onTrade = false
 local onUserTrade, onPlayerTrade = false, false
+local NewItemDialog = ini.settings.NewDialog
+local ItemDialog = {}
 local tradePlayer = {}
 local DialogText = {}
 local newUpdate = {version = script.this.version, updates = "Релиз."}
@@ -127,6 +131,7 @@ end
 imgui.OnInitialize(function()
     local glyph_ranges = imgui.GetIO().Fonts:GetGlyphRangesCyrillic()
     font = imgui.GetIO().Fonts:AddFontFromFileTTF('moonloader/TradeHelper/EagleSans-Reg.ttf', 20, _, glyph_ranges)
+    font2 = imgui.GetIO().Fonts:AddFontFromFileTTF('moonloader/TradeHelper/EagleSans-Reg.ttf', 18, _, glyph_ranges)
     imgui.GetIO().IniFilename = nil
     white_style()
 end)
@@ -151,10 +156,7 @@ local MainFrame = imgui.OnFrame(function() return MainWindow[0] end, function(pl
         if imgui.BeginChild('Information', imgui.ImVec2(250, 150), true) then
             imgui.Text(u8"Информация о скрипте:")
             imgui.Text(u8"Автор: Turan_")
-            imgui.Text(u8"Версия: " .. script.this.version)
-            if imgui.IsItemClicked() then
-                os.execute('explorer https://github.com/Turan-Fresko/TradeHelper-ARZ')
-            end
+            imgui.Link("https://github.com/Turan-Fresko/TradeHelper-ARZ",u8"Версия: " .. script.this.version)
             imgui.Text(u8"Состояние:")
             if imgui.Button(u8'Перезагрузить',imgui.ImVec2(125,38)) then
                 lua_thread.create(function() 
@@ -259,12 +261,26 @@ local UpdateFrame = imgui.OnFrame(function() return UpdateWindow[0] end, functio
                     downloadUrlToFile('https://raw.githubusercontent.com/Turan-Fresko/TradeHelper-ARZ/main/tradehelper.lua', thisScript().path, function (id, status, p1, p2)
                         if status == dlstatus.STATUSEX_ENDDOWNLOAD then
                             sampAddChatMessage(tag..'Обновление установлена! Перезагружаюсь...', colour)
+                            sampAddChatMessage(" ", -1)
                             thisScript():reload()
                         end
                     end)
                 end
             end
         end
+    imgui.PopFont()
+    imgui.End()
+end)
+
+local ItemFrame = imgui.OnFrame(function() return ItemWindow[0] end, function(player)
+    imgui.SetNextWindowPos(imgui.ImVec2(sizeX / 2, sizeY / 2), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5))
+    imgui.SetNextWindowSize(imgui.ImVec2(600, 500), imgui.Cond.FirstUseEver)
+    imgui.PushFont(font)
+    imgui.Begin(u8"Информация о предмете", ItemWindow, imgui.WindowFlags.NoResize + imgui.WindowFlags.NoCollapse)
+        if sampIsDialogActive() then
+            sampCloseCurrentDialogWithButton(1)
+        end
+        imgui.TextColoredRGB(ItemDialog.text)
     imgui.PopFont()
     imgui.End()
 end)
@@ -322,7 +338,6 @@ function ev.onServerMessage(id,text ,color)
 end
 
 function ev.onShowTextDraw(id, data)
-    print(id .. " " .. data.text)
     if onTrade then
         if id == 2078 and not data.text == '_' then
             lua_thread.create(function()
@@ -331,42 +346,6 @@ function ev.onShowTextDraw(id, data)
             end)
         end
     end
-end
-
-function asyncHttpRequest(method, url, args, resolve, reject)
-    local request_thread = effil.thread(function (method, url, args)
-       local result, response = pcall(requests.request, method, url, args)
-       if result then
-          response.json, response.xml = nil, nil
-          return true, response
-       else
-          return false, response
-       end
-    end)(method, url, args)
-    if not resolve then resolve = function() end end
-    if not reject then reject = function() end end
-    lua_thread.create(function()
-       local runner = request_thread
-       while true do
-          local status, err = runner:status()
-          if not err then
-             if status == 'completed' then
-                local result, response = runner:get()
-                if result then
-                   resolve(response)
-                else
-                   reject(response)
-                end
-                return
-             elseif status == 'canceled' then
-                return reject(status)
-             end
-          else
-             return reject(err)
-          end
-          wait(0)
-       end
-    end)
 end
 
 function checkUpdates()
@@ -378,6 +357,7 @@ function checkUpdates()
         else
             newUpdate = responseJson
             sampAddChatMessage(tag .. 'Вышло новое обновление!',colour)
+            UpdateWindow[0] = true
         end
     else sampAddChatMessage(tag .. '{ff4444}Не удалось проверить наличие обновлений!',colour) end
 end
@@ -461,8 +441,9 @@ function ev.onShowDialog(id, style, title, button1, button2, text)
         onTrade = true
         DialogWindow[0] = true
     end
-    if onTrade and onUserTrade or onPlayerTrade then
-
+    if NewItemDialog and id == 8236 then
+        ItemDialog = {id = id, title = title, text = text}
+        ItemWindow[0] = true
     end
 end
 
