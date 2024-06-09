@@ -1,6 +1,6 @@
 script_name("Trade Helper")
 script_author("Turan_")
-script_version("1.0.0")
+script_version("1.0.1")
 script_description("Скрипт, помогающий при обмене/общении с игроком в людных местах, путем вывода сообщений в отдельное диалоговое окно.")
 
 require 'lib.moonloader'
